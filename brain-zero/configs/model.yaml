@@ -1,7 +1,7 @@
 # GPT-2 style architecture (weights initialized randomly — no pretrained checkpoint)
 # Profiles: baby | small | medium (override via env or copy this file)
 
-profile: baby
+profile: small
 
 # baby: fast sanity check (~10M params)
 baby:

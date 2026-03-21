@@ -42,16 +42,19 @@ Estendibile a corpus custom (personalita Eubot) e poi italiano.
 
 ## Roadmap operativa
 
-### Fase 1 — Baby run (EN, test pipeline) ← PROSSIMO STEP
+### Fase 1 — Baby run (EN, test pipeline) ✓
 - [x] Codice pipeline completo
 - [x] `test_baby.py` OK su CPU locale
-- [ ] Eseguire sul Pod RunPod con GPU (vedi sezione RunPod sotto)
-- [ ] Verificare che `inference.py` genera testo inglese coerente
+- [x] Training baby su RunPod GPU (5000 step, ~2 min)
+- [x] Fix tokenizer ByteLevel decoder (bug Ġ)
 
-### Fase 2 — Small run (EN, primo modello semi-serio)
-- [ ] Cambiare profilo in `model.yaml` a `small`
-- [ ] Training completo su WikiText-103 (~125M params)
-- [ ] Valutare qualita output (loss, campioni generati)
+### Fase 2 — Small run (EN, training massivo) ← PROSSIMO STEP
+- [x] `--resume` per continuare training da checkpoint
+- [x] `download_data.py --mode large` (WikiText + OpenWebText 200k docs)
+- [x] `training_phase2.yaml` (125M params, 50k step, seq 1024)
+- [x] `run_phase2.sh` script unico
+- [ ] Eseguire `run_phase2.sh` su RunPod
+- [ ] Valutare qualita output (loss < 3.5 target, campioni generati)
 
 ### Fase 3 — Aggiunta italiano
 - [ ] Aggiornare `download_data.py` per scaricare Wikipedia IT (HF `wikipedia`, lang `it`)
@@ -73,36 +76,24 @@ Estendibile a corpus custom (personalita Eubot) e poi italiano.
 
 ---
 
-## RunPod — comandi per Fase 1
+## RunPod — comandi
 
-Apri il terminale web RunPod o `ssh eubot`, poi:
+### Fase 2 (training massivo)
 
 ```bash
-# 1. Clone e setup
-git clone https://github.com/socialengaged/eubot.git
-cd eubot/brain-zero
-pip install -r requirements.txt
-
-# 2. Test pipeline (1-2 min, conferma che PyTorch+CUDA funzionano)
-python scripts/test_baby.py
-
-# 3. Scarica dati WikiText-103 inglese
-python scripts/download_data.py
-
-# 4. Pulisci e prepara JSONL
-python scripts/build_dataset.py
-
-# 5. Addestra tokenizer BPE
-python scripts/train_tokenizer.py
-
-# 6. TRAINING baby (pochi minuti su GPU)
-python scripts/train.py
-
-# 7. Genera testo dal modello addestrato
-python scripts/inference.py --checkpoint models/checkpoints/step_5000 --prompt "The world"
+cd /eubot/eubot && git pull && cd brain-zero
+bash scripts/run_phase2.sh
 ```
 
-Dopo step 7, il modello "parla" (in inglese, qualita baby).
+Tempo: ~1-3 ore. Il modello cresce a 125M params su ~500 MB di testo.
+Checkpoint salvati ogni 5000 step. Se interrotto, riprendere con:
+
+```bash
+python scripts/train.py --profile small --training_config training_phase2.yaml \
+  --resume models/checkpoints/step_XXXXX
+```
+
+Dopo il training: `python scripts/chat.py`
 
 ---
 
@@ -116,4 +107,4 @@ Dopo step 7, il modello "parla" (in inglese, qualita baby).
 
 ## Changelog
 
-- **2026-03-21:** Pipeline completa: test_baby.py, download, build, tokenizer, train, inference. Test locale CPU OK. Roadmap aggiornata con fasi IT e personalita.
+- **2026-03-21:** Pipeline completa. Baby run OK su RunPod. Fix tokenizer. Phase 2 pronta (125M, 50k step, OpenWebText).

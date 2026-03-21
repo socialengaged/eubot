@@ -86,10 +86,12 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--profile", type=str, default=None, help="Override model.yaml profile (baby|small|medium)")
     ap.add_argument("--max_train_blocks", type=int, default=None, help="Cap training blocks for quick tests")
+    ap.add_argument("--training_config", type=str, default="training.yaml", help="Training config filename inside configs/")
+    ap.add_argument("--resume", type=Path, default=None, help="Resume from checkpoint dir (e.g. models/checkpoints/step_5000)")
     args = ap.parse_args()
 
     root = repo_root()
-    train_cfg = load_yaml(root / "configs" / "training.yaml")
+    train_cfg = load_yaml(root / "configs" / args.training_config)
     mdict = model_config_dict(args.profile)
     tok_dir = root / train_cfg["tokenizer_dir"]
     if not (tok_dir / "tokenizer.json").is_file() and not (tok_dir / "tokenizer_config.json").is_file():
@@ -107,7 +109,20 @@ def main() -> None:
 
     device = device_auto()
     print(f"Device: {device}")
-    model = GPT2LMHeadModel(cfg).to(device)
+
+    resume_step = 0
+    if args.resume and args.resume.is_dir():
+        print(f"Resuming from {args.resume} ...")
+        model = GPT2LMHeadModel.from_pretrained(str(args.resume)).to(device)
+        name = args.resume.name
+        if name.startswith("step_"):
+            resume_step = int(name.split("_")[1])
+        print(f"  resumed at step {resume_step}")
+    else:
+        model = GPT2LMHeadModel(cfg).to(device)
+
+    param_count = sum(p.numel() for p in model.parameters()) / 1e6
+    print(f"Model: {param_count:.0f}M params")
 
     train_path = root / train_cfg["data_train"]
     val_path = root / train_cfg["data_val"]
@@ -148,11 +163,18 @@ def main() -> None:
     max_steps = int(train_cfg["max_steps"])
     warmup = int(train_cfg["warmup_steps"])
 
+    remaining_steps = max_steps - resume_step
+    if remaining_steps <= 0:
+        print(f"Already at step {resume_step} >= max_steps {max_steps}. Nothing to do.")
+        return
+
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
     scheduler = get_linear_schedule_with_warmup(opt, warmup, max_steps)
+    for _ in range(resume_step):
+        scheduler.step()
 
     use_fp16 = bool(train_cfg.get("use_fp16", True)) and device.type == "cuda"
-    scaler = torch.cuda.amp.GradScaler(enabled=use_fp16)
+    scaler = torch.amp.GradScaler("cuda", enabled=use_fp16)
 
     ckpt_dir = root / train_cfg["checkpoint_dir"]
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -161,11 +183,11 @@ def main() -> None:
     eval_every = int(train_cfg["eval_every"])
     grad_clip = float(train_cfg.get("gradient_clip", 1.0))
 
-    global_step = 0
+    global_step = resume_step
     model.train()
     running_loss = 0.0
     t0 = time.time()
-    pbar = tqdm(total=max_steps, desc="train")
+    pbar = tqdm(total=max_steps, initial=resume_step, desc="train")
 
     train_iter = iter(train_loader)
     while global_step < max_steps:
@@ -178,7 +200,7 @@ def main() -> None:
                 train_iter = iter(train_loader)
                 batch = next(train_iter)
             batch = batch.to(device)
-            with torch.cuda.amp.autocast(enabled=use_fp16):
+            with torch.amp.autocast("cuda", enabled=use_fp16):
                 out = model(input_ids=batch, labels=batch)
                 loss = out.loss / accum
             scaler.scale(loss).backward()
@@ -212,7 +234,7 @@ def main() -> None:
                     if i >= eval_batches:
                         break
                     vb = vb.to(device)
-                    with torch.cuda.amp.autocast(enabled=use_fp16):
+                    with torch.amp.autocast("cuda", enabled=use_fp16):
                         out = model(input_ids=vb, labels=vb)
                     val_loss += out.loss.item()
                     n += 1
