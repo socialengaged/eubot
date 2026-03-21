@@ -13,6 +13,8 @@ pip install -r requirements.txt
 export HF_TOKEN=hf_xxx   # opzionale, evita rate limit HF
 
 python scripts/prepare_data.py
+# IT+EN (default): OPUS en-it + CodeFeedback IT se presente
+# Solo EN: python scripts/prepare_data.py --no-include_italian
 python scripts/finetune.py
 python scripts/merge_adapter.py
 python scripts/chat.py

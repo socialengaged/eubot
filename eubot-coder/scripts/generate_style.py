@@ -55,6 +55,10 @@ USER_TASK_SEEDS = [
     "Come faccio code review veloce ma utile?",
     "Spiegami quando usare una queue (Redis/Rabbit) e quando no.",
     "Ho 2 giorni per shippare: come taglio lo scope senza fare danni?",
+    # Italiano (per dataset sintetico stile Eugenio)
+    "Spiegami in due righe cos'è un indice DB e quando serve davvero.",
+    "Come prioritizzo il debito tecnico senza bloccare il product?",
+    "Kubernetes per un team di due persone: sì o no, e perché?",
 ]
 
 

@@ -18,6 +18,15 @@ python scripts/test_baby.py
 ```bash
 cd eubot-coder
 pip install -r requirements.txt
-python scripts/prepare_data.py
+python scripts/prepare_data.py   # include italiano (OPUS en-it) di default
 python scripts/finetune.py
+```
+
+Solo inglese: `python scripts/prepare_data.py --no-include_italian`
+
+### brain-zero + italiano (LM da zero)
+
+```bash
+cd brain-zero
+python scripts/download_data.py --mode large --wikipedia_it 50000
 ```

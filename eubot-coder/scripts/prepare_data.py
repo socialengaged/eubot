@@ -22,8 +22,9 @@ from eubot_coder_utils import load_yaml, repo_root
 
 
 DEFAULT_SYSTEM = (
-    "Sei Eubot, assistente di programmazione. Stile: diretto, pratico, strategico, "
-    "mai verboso. Rispondi con codice quando serve, spiegazioni brevi quando basta."
+    "Sei Eubot, assistente di programmazione. Rispondi nella stessa lingua dell'utente "
+    "(italiano o inglese). Stile: diretto, pratico, strategico, mai verboso. "
+    "Rispondi con codice quando serve, spiegazioni brevi quando basta."
 )
 
 
@@ -84,6 +85,68 @@ def load_code_instructions_alpaca(system: str, max_rows: int | None) -> Dataset:
     return Dataset.from_list(rows)
 
 
+def load_opus_en_it(system: str, max_pairs: int) -> Dataset:
+    """Parallel EN-IT sentences (OPUS-100) as translation instructions — strengthens Italian."""
+    print(f"Loading Helsinki-NLP/opus-100 (en-it) streaming, max_pairs={max_pairs} …")
+    ds = load_dataset("Helsinki-NLP/opus-100", "en-it", split="train", streaming=True)
+    rows: list[dict] = []
+    for i, ex in enumerate(ds):
+        if i >= max_pairs:
+            break
+        tr = ex.get("translation") or {}
+        en = (tr.get("en") or "").strip()
+        it = (tr.get("it") or "").strip()
+        if len(en) < 15 or len(it) < 15:
+            continue
+        rows.append(
+            {
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": f"Traduci in italiano il seguente testo:\n\n{en}"},
+                    {"role": "assistant", "content": it},
+                ]
+            }
+        )
+        rows.append(
+            {
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": f"Traduci in inglese il seguente testo:\n\n{it}"},
+                    {"role": "assistant", "content": en},
+                ]
+            }
+        )
+    print(f"  -> {len(rows)} chat rows (bidirectional translation)")
+    return Dataset.from_list(rows)
+
+
+def load_codefeedback_it_only(system: str, max_rows: int | None) -> Dataset:
+    """Subset of CodeFeedback where lang is Italian (if column exists)."""
+    ds = load_dataset("m-a-p/CodeFeedback-Filtered-Instruction", split="train")
+    if "lang" not in ds.column_names:
+        print("  CodeFeedback IT: no 'lang' column — skip")
+        return Dataset.from_list([])
+
+    def _is_it(ex: dict) -> bool:
+        v = str(ex.get("lang", "")).lower()
+        return v in ("it", "italian", "ita", "it-it")
+
+    ds_it = ds.filter(_is_it)
+    if len(ds_it) == 0:
+        print("  CodeFeedback IT: 0 rows after filter — skip")
+        return Dataset.from_list([])
+    n = min(max_rows or len(ds_it), len(ds_it))
+    ds_it = ds_it.shuffle(seed=42).select(range(n))
+
+    rows = []
+    for ex in ds_it:
+        m = codefeedback_to_messages(ex, system)
+        if m is not None:
+            rows.append(m)
+    print(f"  -> {len(rows)} IT code-feedback rows")
+    return Dataset.from_list(rows)
+
+
 def load_codefeedback(system: str, max_rows: int | None) -> Dataset:
     ds = load_dataset("m-a-p/CodeFeedback-Filtered-Instruction", split="train")
     n = min(max_rows or len(ds), len(ds))
@@ -114,6 +177,24 @@ def main() -> None:
     ap.add_argument("--val_ratio", type=float, default=0.02)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--merge_style", type=Path, default=None, help="Optional JSONL from generate_style.py")
+    ap.add_argument(
+        "--include_italian",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Add OPUS en-it translation pairs + Italian CodeFeedback rows (default: on)",
+    )
+    ap.add_argument(
+        "--max_opus_pairs",
+        type=int,
+        default=12_000,
+        help="Max parallel sentence pairs from OPUS-100 en-it (each pair -> 2 chat rows)",
+    )
+    ap.add_argument(
+        "--max_codefeedback_it",
+        type=int,
+        default=5_000,
+        help="Max rows from CodeFeedback when lang=it (if column exists)",
+    )
     args = ap.parse_args()
 
     cfg = load_yaml(args.config)
@@ -142,6 +223,18 @@ def main() -> None:
         print(f"  -> {len(parts[-1])} rows")
     except Exception as e:
         print(f"  SKIP CodeFeedback: {e}")
+
+    if args.include_italian:
+        print("Italian: OPUS-100 en-it (translation) …")
+        try:
+            parts.append(load_opus_en_it(system, args.max_opus_pairs))
+        except Exception as e:
+            print(f"  SKIP OPUS en-it: {e}")
+        print("Italian: CodeFeedback rows with lang=it …")
+        try:
+            parts.append(load_codefeedback_it_only(system, args.max_codefeedback_it))
+        except Exception as e:
+            print(f"  SKIP CodeFeedback IT: {e}")
 
     parts = [p for p in parts if len(p) > 0]
     if not parts:

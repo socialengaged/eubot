@@ -57,10 +57,15 @@ Estendibile a corpus custom (personalita Eubot) e poi italiano.
 - [ ] Valutare qualita output (loss < 3.5 target, campioni generati)
 
 ### Fase 3 — Aggiunta italiano
-- [ ] Aggiornare `download_data.py` per scaricare Wikipedia IT (HF `wikipedia`, lang `it`)
-- [ ] Opzione: aggiungere OSCAR o MC4 italiano come fonte aggiuntiva
-- [ ] Riaddrestrare tokenizer BPE su dati EN+IT combinati
-- [ ] Rilanciare training su dataset bilingue
+- [x] `download_data.py --wikipedia_it N` — Wikipedia IT streaming (`20220301.it`)
+- [ ] Opzione futura: OSCAR / MC4 italiano (corpus piu grande)
+- [ ] Dopo aver aggiunto testo IT: riaddrestrare tokenizer BPE su `train.jsonl` misto
+- [ ] Rilanciare `train.py` su dataset bilingue (EN+IT)
+
+**Eubot Coding (QLoRA, consigliato per chat IT/EN):** in `eubot-coder/`, `prepare_data.py` include per default:
+- OPUS-100 `en-it` (traduzione bidirezionale come istruzioni)
+- sottoinsieme CodeFeedback con `lang=it` se la colonna esiste  
+Vedi [eubot-coder/README.md](../eubot-coder/README.md) sezione Lingua.
 
 ### Fase 4 — Personalita Eubot
 - [ ] Creare dataset custom (testi di Eugenio, stile, FAQ, istruzioni)

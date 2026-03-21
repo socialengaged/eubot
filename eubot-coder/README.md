@@ -35,6 +35,20 @@ python scripts/generate_style.py --print_jsonl_example
 
 Use the printed master prompt in ChatGPT/Claude to produce JSONL lines; save as `data/processed/style_gpt.jsonl` and re-run `prepare_data.py --merge_style ...`.
 
+## Lingua (italiano + inglese)
+
+- **`prepare_data.py`** di default aggiunge dati per l’italiano:
+  - **OPUS-100 `en-it`**: coppie di traduzione come istruzioni (streaming, leggero in RAM).
+  - **CodeFeedback `lang=it`** (se la colonna `lang` esiste nel dataset).
+- Per **solo inglese** (come prima):  
+  `python scripts/prepare_data.py --no-include_italian`
+- Regola quantità IT:  
+  `--max_opus_pairs 8000` , `--max_codefeedback_it 3000`
+
+Il **system prompt** in `finetune.yaml` chiede di rispondere nella lingua dell’utente (IT o EN).
+
+Nessun pacchetto extra: tutto via `datasets` (HuggingFace).
+
 ## Config
 
 - [`configs/finetune.yaml`](configs/finetune.yaml) — model id, LoRA targets, LR, batch, paths.

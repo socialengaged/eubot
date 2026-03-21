@@ -5,6 +5,9 @@ Modes:
   --mode wiki      WikiText-103 only (~15 MB, fast)
   --mode large     WikiText-103 + OpenWebText subset (~500 MB–1 GB)
   --mode full      WikiText-103 + full OpenWebText (~6 GB)
+
+Italian (raw text for tokenizer / LM from scratch):
+  --wikipedia_it N   Append N articles from Wikipedia IT (HF wikipedia 20220301.it)
 """
 from __future__ import annotations
 
@@ -43,6 +46,23 @@ def download_wikitext() -> tuple[list[str], list[str]]:
     return train, val
 
 
+def download_wikipedia_it(max_articles: int) -> list[str]:
+    """Italian Wikipedia articles (streaming) for bilingual LM training."""
+    print(f"Downloading Wikipedia IT (max_articles={max_articles}) …")
+    ds = load_dataset("wikipedia", "20220301.it", split="train", streaming=True)
+    texts: list[str] = []
+    for i, ex in enumerate(ds):
+        if i >= max_articles:
+            break
+        t = (ex.get("text") or "").strip()
+        if len(t) >= 100:
+            texts.append(t)
+        if (i + 1) % 20_000 == 0:
+            print(f"    ... {i + 1} scanned, {len(texts)} kept")
+    print(f"  Wikipedia IT: {len(texts)} docs kept")
+    return texts
+
+
 def download_openwebtext(max_docs: int | None = None) -> list[str]:
     print(f"Downloading OpenWebText (max_docs={max_docs or 'all'}) ...")
     ds = load_dataset("openwebtext", split="train", streaming=True)
@@ -63,6 +83,12 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--mode", choices=["wiki", "large", "full"], default="large",
                    help="wiki=WikiText only, large=+OWT 200k docs, full=+OWT all")
+    p.add_argument(
+        "--wikipedia_it",
+        type=int,
+        default=0,
+        help="If >0, append N Italian Wikipedia articles (adds Italian comprehension for brain-zero)",
+    )
     args = p.parse_args()
 
     RAW_DIR.mkdir(parents=True, exist_ok=True)
@@ -76,6 +102,9 @@ def main() -> None:
         owt_texts = download_openwebtext(max_docs=None)
 
     all_train = wiki_train + owt_texts
+
+    if args.wikipedia_it > 0:
+        all_train = all_train + download_wikipedia_it(args.wikipedia_it)
 
     save_texts(all_train, RAW_DIR / "train.txt")
     save_texts(wiki_val, RAW_DIR / "val.txt")
