@@ -12,7 +12,11 @@ const aiBaseUrl = (process.env.AI_BASE_URL ?? "").replace(/\/$/, "");
 const aiApiKey = process.env.AI_API_KEY ?? "";
 const aiModel = process.env.AI_MODEL ?? "mistral";
 
+const host = (process.env.HOST ?? "0.0.0.0").trim() || "0.0.0.0";
+
 export const config = {
+  /** Bind address (0.0.0.0 = tutte le interfacce, utile su RunPod/VPS) */
+  host,
   port: Number.isFinite(port) ? port : 3000,
   ollamaBaseUrl,
   ollamaModel,

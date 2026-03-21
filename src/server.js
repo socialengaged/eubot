@@ -19,8 +19,8 @@ app.get("*", (_req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
 });
 
-app.listen(config.port, () => {
-  console.log(`Eubot listening on http://localhost:${config.port}`);
+app.listen(config.port, config.host, () => {
+  console.log(`Eubot listening on http://${config.host}:${config.port}`);
   if (config.aiProvider === "openai") {
     console.log(`AI: OpenAI-compatible (${config.aiBaseUrl}, model: ${config.aiModel})`);
   } else {

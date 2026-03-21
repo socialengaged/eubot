@@ -23,6 +23,8 @@ Apri **http://localhost:3000**.
 
 Architettura, variabili d’ambiente e API: **[PROJECT_SPEC.md](PROJECT_SPEC.md)**.
 
+Deploy SSH (RunPod / VPS): **[docs/RUNPOD.md](docs/RUNPOD.md)**.
+
 ## Licenza
 
 MIT
