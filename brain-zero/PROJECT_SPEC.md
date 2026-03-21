@@ -41,6 +41,19 @@
 - [ ] Log estesi (WandB opzionale)
 - [ ] API inference (FastAPI) fuori da questo repo
 
+## RunPod
+
+```bash
+git clone https://github.com/socialengaged/eubot.git && cd eubot/brain-zero
+pip install -r requirements.txt
+python scripts/test_baby.py
+python scripts/download_data.py
+python scripts/build_dataset.py
+python scripts/train_tokenizer.py
+python scripts/train.py --max_train_blocks 2000   # prova breve
+python scripts/inference.py --checkpoint models/checkpoints/step_1000 --prompt "The"
+```
+
 ## Changelog
 
-- **2026-03-21:** Prima versione pipeline + `test_baby.py`.
+- **2026-03-21:** Prima versione pipeline + `test_baby.py` (test locale CPU OK).
