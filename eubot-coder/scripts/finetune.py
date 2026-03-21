@@ -30,6 +30,8 @@ def build_bnb_config() -> BitsAndBytesConfig:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", type=Path, default=ROOT / "configs" / "finetune.yaml")
+    ap.add_argument("--resume", action="store_true",
+                    help="Resume from latest checkpoint in output_dir (if any)")
     args = ap.parse_args()
 
     cfg = load_yaml(args.config)
@@ -124,7 +126,16 @@ def main() -> None:
             tokenizer=tokenizer,
         )
 
-    trainer.train()
+    resume_ckpt = None
+    if args.resume:
+        ckpts = sorted(out_dir.glob("checkpoint-*"), key=lambda p: int(p.name.split("-")[-1]))
+        if ckpts:
+            resume_ckpt = str(ckpts[-1])
+            print(f"Resuming from {resume_ckpt}")
+        else:
+            print("No checkpoint found, starting from scratch.")
+
+    trainer.train(resume_from_checkpoint=resume_ckpt)
     trainer.save_model(str(out_dir))
     tokenizer.save_pretrained(str(out_dir))
     print(f"Adapter saved to {out_dir}")
