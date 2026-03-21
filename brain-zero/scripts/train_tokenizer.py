@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from tokenizers import Tokenizer, models, pre_tokenizers, trainers
+from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 from transformers import PreTrainedTokenizerFast
 
 
@@ -38,6 +38,7 @@ def main() -> None:
     bpe = models.BPE(unk_token="<unk>")
     tokenizer = Tokenizer(bpe)
     tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+    tokenizer.decoder = decoders.ByteLevel()
     trainer = trainers.BpeTrainer(
         vocab_size=args.vocab_size,
         special_tokens=["<pad>", "<unk>", "<eos>", "<bos>"],
