@@ -13,14 +13,27 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import torch
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from peft import PeftModel
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from eubot_coder_utils import load_yaml, repo_root
 
 app = FastAPI(title="Eubot Coder")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+WEBAPP_DIR = ROOT / "webapp"
+if WEBAPP_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=str(WEBAPP_DIR)), name="static")
 
 _model = None
 _tokenizer = None
@@ -82,6 +95,33 @@ def startup():
     else:
         raise RuntimeError("No merged model or adapter found. Train or merge first.")
     _model, _tokenizer = load_model(base, mdir, adir)
+
+
+@app.get("/")
+def index():
+    from fastapi.responses import FileResponse
+    index_path = WEBAPP_DIR / "index.html"
+    if index_path.is_file():
+        return FileResponse(str(index_path), media_type="text/html")
+    return JSONResponse({"error": "webapp/index.html not found"}, status_code=404)
+
+
+@app.get("/css/{path:path}")
+def css_files(path: str):
+    from fastapi.responses import FileResponse
+    fp = WEBAPP_DIR / "css" / path
+    if fp.is_file():
+        return FileResponse(str(fp), media_type="text/css")
+    return JSONResponse({"error": "not found"}, status_code=404)
+
+
+@app.get("/js/{path:path}")
+def js_files(path: str):
+    from fastapi.responses import FileResponse
+    fp = WEBAPP_DIR / "js" / path
+    if fp.is_file():
+        return FileResponse(str(fp), media_type="application/javascript")
+    return JSONResponse({"error": "not found"}, status_code=404)
 
 
 @app.get("/health")
