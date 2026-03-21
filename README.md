@@ -1,30 +1,13 @@
-# Eubot
+# eubot
 
-Chatbot locale (Node.js + Express) con personalità definita, memoria per utente e supporto **Ollama** o API **OpenAI-compat** (Groq, OpenRouter, Mistral, ecc.).
+Repository per il progetto **Eubot**. Contiene:
 
-## Quick start
+- **`brain-zero/`** — pipeline di training da zero per un mini-LLM (GPT-style): dati, tokenizer BPE, `train.py`, inferenza. Vedi [brain-zero/README.md](brain-zero/README.md).
+
+## Quick link
 
 ```bash
-git clone https://github.com/socialengaged/eubot.git
-cd eubot
-cp .env.example .env   # Windows: copy .env.example .env
-npm install
-npm start
+cd brain-zero
+pip install -r requirements.txt
+python scripts/test_baby.py
 ```
-
-Apri **http://localhost:3000**.
-
-### Backend AI
-
-- **Ollama (locale):** installa [Ollama](https://ollama.com), `ollama pull mistral`, lascia `AI_PROVIDER=ollama` in `.env`.
-- **Groq / altri:** imposta `AI_PROVIDER=openai`, `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL` (vedi `.env.example`).
-
-## Documentazione
-
-Architettura, variabili d’ambiente e API: **[PROJECT_SPEC.md](PROJECT_SPEC.md)**.
-
-Deploy SSH (RunPod / VPS): **[docs/RUNPOD.md](docs/RUNPOD.md)**.
-
-## Licenza
-
-MIT

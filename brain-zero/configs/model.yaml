@@ -1,0 +1,40 @@
+# GPT-2 style architecture (weights initialized randomly — no pretrained checkpoint)
+# Profiles: baby | small | medium (override via env or copy this file)
+
+profile: baby
+
+# baby: fast sanity check (~10M params)
+baby:
+  vocab_size: 8192
+  n_positions: 512
+  n_embd: 256
+  n_layer: 4
+  n_head: 4
+  n_inner: 1024
+  resid_pdrop: 0.1
+  embd_pdrop: 0.1
+  attn_pdrop: 0.1
+
+# small: ~125M class
+small:
+  vocab_size: 32000
+  n_positions: 1024
+  n_embd: 768
+  n_layer: 12
+  n_head: 12
+  n_inner: 3072
+  resid_pdrop: 0.1
+  embd_pdrop: 0.1
+  attn_pdrop: 0.1
+
+# medium: ~350M class
+medium:
+  vocab_size: 32000
+  n_positions: 1024
+  n_embd: 1024
+  n_layer: 24
+  n_head: 16
+  n_inner: 4096
+  resid_pdrop: 0.1
+  embd_pdrop: 0.1
+  attn_pdrop: 0.1

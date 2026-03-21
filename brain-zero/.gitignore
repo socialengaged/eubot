@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+data/raw/
+data/processed/*.jsonl
+models/tokenizer/
+models/checkpoints/
+*.log
+.DS_Store
+wandb/
