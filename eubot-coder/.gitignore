@@ -1,0 +1,9 @@
+data/raw/
+data/processed/*.jsonl
+models/
+outputs/
+__pycache__/
+*.pyc
+.env
+.venv/
+wandb/

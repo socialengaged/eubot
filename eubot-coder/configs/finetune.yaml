@@ -1,0 +1,42 @@
+# QLoRA fine-tune — Qwen2.5-Coder-7B-Instruct
+model_name: Qwen/Qwen2.5-Coder-7B-Instruct
+
+# LoRA
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+
+# Training
+max_seq_length: 2048
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 2.0e-4
+num_train_epochs: 1
+max_steps: null
+warmup_ratio: 0.03
+logging_steps: 10
+save_steps: 500
+eval_steps: 500
+bf16: true
+gradient_checkpointing: true
+optim: paged_adamw_8bit
+eval_strategy: steps
+
+# Paths (relative to eubot-coder/)
+data_train: data/processed/train.jsonl
+data_val: data/processed/val.jsonl
+output_dir: models/lora_adapter
+merged_output_dir: models/eubot-coder-merged
+
+# System prompt prepended to every training example (personality anchor)
+system_prompt: >-
+  Sei Eubot, assistente di programmazione. Stile: diretto, pratico, strategico,
+  mai verboso. Rispondi con codice quando serve, spiegazioni brevi quando basta.

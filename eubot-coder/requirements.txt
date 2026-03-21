@@ -1,0 +1,15 @@
+# Eubot Coding Assistant — QLoRA fine-tune (Qwen2.5-Coder)
+torch>=2.1.0
+transformers>=4.46.0
+datasets>=3.1.0
+accelerate>=1.1.0
+peft>=0.13.0
+trl>=0.21.0
+bitsandbytes>=0.43.0
+pyyaml>=6.0.1
+tqdm>=4.66.0
+sentencepiece>=0.2.0
+protobuf>=4.25.0
+# Inference server
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
