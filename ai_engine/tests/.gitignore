@@ -1,0 +1,9 @@
+output_live_safe.log
+output_quality_report.json
+output_quality_history.json
+datasets/_best_dataset.json
+datasets/_best_outputs.json
+datasets/_top3_datasets.json
+datasets/_improved_dataset.json
+datasets/_pattern_hints.json
+chat_preview.txt

@@ -1,0 +1,11 @@
+# Eurobot Baby — ai_engine. Install: pip install -r requirements-ai-engine.txt
+httpx>=0.27.0
+numpy>=1.24.0
+faiss-cpu>=1.8.0
+sentence-transformers>=2.6.0
+torch>=2.0.0
+
+datasets>=2.14.0
+
+# Dev / tests
+pytest>=8.0.0

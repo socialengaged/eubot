@@ -1,0 +1,42 @@
+# Fine-tune su final_dataset_v3.jsonl (merge pipeline ai_engine).
+# Sul pod: train.py legge tipicamente configs/training.yaml — copia questo file:
+#   cp -a configs/training.yaml "configs/training.yaml.bak-$(date -u +%Y%m%dT%H%M%SZ)"
+#   cp configs/training_finetune_v3.yaml configs/training.yaml
+# (oppure passa --config se scripts/train.py lo supporta).
+#
+# Mapping rispetto a parametri "HF-style":
+#   per_device_train_batch_size -> batch_size
+#   gradient_accumulation_steps -> gradient_accumulation_steps
+#   max_seq_length -> max_seq_len
+#   fp16 -> use_fp16
+#   output_dir -> checkpoint_dir
+#   save_steps -> save_every
+#   evaluation_strategy: no -> eval_every molto alto (nessuna eval frequente)
+#   warmup_ratio 0.1 -> warmup_steps ≈ int(0.1 * max_steps) (sostituire dopo max_steps)
+#
+# effective_batch = batch_size * gradient_accumulation_steps  (= 2 * 8 = 16)
+# max_steps = ceil(N_righe_jsonl / effective_batch) * num_epochs   (qui num_epochs = 3)
+# Esempio: N=200000 -> ceil(200000/16)=12500 -> max_steps=37500
+
+batch_size: 2
+gradient_accumulation_steps: 8
+learning_rate: 1.0e-5
+weight_decay: 0.01
+# Dopo aver fissato max_steps, imposta warmup_steps ≈ floor(0.1 * max_steps)
+warmup_steps: 1000
+max_steps: 37500
+max_seq_len: 512
+save_every: 500
+# Logging ogni ~50 step: se train.py non ha logging_steps in YAML, usa PYTHONUNBUFFERED=1 e tail -f
+eval_every: 999999999
+eval_batches: 20
+seed: 42
+use_fp16: true
+gradient_clip: 1.0
+
+# Dataset unico: path relativi a /workspace/eurobot_baby
+data_train: data/final_dataset_v3.jsonl
+# Se train.py richiede val: crea un file piccolo, es. head -n 4000 data/final_dataset_v3.jsonl > data/val_v3_sample.jsonl
+data_val: data/val_v3_sample.jsonl
+tokenizer_dir: models/tokenizer
+checkpoint_dir: models/checkpoints_v3

@@ -1,3 +1,13 @@
 # Root repo
 .DS_Store
 Thumbs.db
+__pycache__/
+*.py[cod]
+
+# Backup scaricato da RunPod (file molto grandi)
+backup_runpod_bundles/
+
+# Uploader
+uploader/.env
+uploader/node_modules/
+uploader/.tmp-webp/

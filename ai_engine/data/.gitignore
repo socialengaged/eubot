@@ -1,0 +1,5 @@
+# Large generated datasets — regenerate with ai_engine/training/*.py
+*.jsonl
+!**/hard_negatives.jsonl
+!**/sample_*.jsonl
+!**/sample_clean*.jsonl
