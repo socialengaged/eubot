@@ -1,7 +1,6 @@
-# batch/accum/num_workers: tuned for GPU throughput (DataLoader workers + AMP in train.py)
-batch_size: 128
-gradient_accumulation_steps: 2
-num_workers: 8
+# Streaming IterableDataset: batch ridotto per VRAM (seq 512); accum compensa (eff ~256).
+batch_size: 32
+gradient_accumulation_steps: 8
 learning_rate: 2.5e-4
 weight_decay: 0.01
 warmup_steps: 800

@@ -2,6 +2,8 @@
 """
 Train GPT-2-style LM from random init. Reads configs/model.yaml + configs/training.yaml.
 Tokenizer must exist at models/tokenizer (run train_tokenizer.py first).
+
+Train data: streaming JSONL (no preload in RAM) via IterableDataset.
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, IterableDataset
 from tqdm import tqdm
 from transformers import GPT2LMHeadModel, PreTrainedTokenizerFast, get_linear_schedule_with_warmup
 
@@ -28,83 +30,93 @@ from baby_utils import (
 )
 
 
-def _dataloader_kwargs(device: torch.device, num_workers: int) -> dict[str, object]:
-    """CPU-side loading: pin_memory + workers evita che il main thread sia il collo di bottiglia."""
-    nw = max(0, int(num_workers))
-    if nw > 0:
-        return {
-            "num_workers": nw,
-            "pin_memory": device.type == "cuda",
-            "persistent_workers": True,
-            "prefetch_factor": 4,
-        }
+def _dataloader_kwargs_streaming(device: torch.device) -> dict[str, object]:
+    """IterableDataset: num_workers=0 (semplice e compatibile); pin_memory per H2D async."""
     return {"num_workers": 0, "pin_memory": device.type == "cuda"}
 
 
 def _move_batch_to_device(batch, device: torch.device, non_blocking: bool):
-    """Sposta batch su device (tensore o dict da futuri collate)."""
+    """Sposta batch su device (tensore o dict da collate)."""
     if isinstance(batch, dict):
         return {k: v.to(device, non_blocking=non_blocking) for k, v in batch.items()}
     return batch.to(device, non_blocking=non_blocking)
 
 
-class BlockDataset(Dataset):
-    """Non-overlapping blocks of token ids from JSONL {text: ...}."""
+def _make_collate_fn(pad_token_id: int):
+    """Padding variabile nel batch; labels=-100 sul pad (loss HF)."""
+
+    def collate(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+        ids = [b["input_ids"] for b in batch]
+        max_len = max(x.size(0) for x in ids)
+        rows: list[torch.Tensor] = []
+        labs: list[torch.Tensor] = []
+        for x in ids:
+            pad_len = max_len - x.size(0)
+            if pad_len > 0:
+                pad = torch.full((pad_len,), pad_token_id, dtype=torch.long)
+                inp_row = torch.cat([x, pad])
+                lab_row = torch.cat([x.clone(), torch.full((pad_len,), -100, dtype=torch.long)])
+            else:
+                inp_row = x
+                lab_row = x.clone()
+            rows.append(inp_row)
+            labs.append(lab_row)
+        input_ids = torch.stack(rows, dim=0)
+        labels = torch.stack(labs, dim=0)
+        attention_mask = (input_ids != pad_token_id).long()
+        return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+
+    return collate
+
+
+class StreamingJsonlIterableDataset(IterableDataset):
+    """Una passata sul file JSONL: tokenizza per riga, niente preload RAM."""
 
     def __init__(
         self,
-        jsonl_path: Path,
+        path: Path,
         tokenizer: PreTrainedTokenizerFast,
-        block_size: int,
-        max_blocks: int | None = None,
+        max_length: int,
+        max_lines: int | None = None,
     ) -> None:
-        self.block_size = block_size
-        eos_id = tokenizer.eos_token_id
-        pad_id = tokenizer.pad_token_id
-        if pad_id is None:
-            pad_id = tokenizer.unk_token_id or 0
+        self.path = path
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.max_lines = max_lines
 
-        buffer: list[int] = []
-        self.blocks: list[torch.Tensor] = []
-
-        with open(jsonl_path, "r", encoding="utf-8") as f:
+    def __iter__(self):
+        n = 0
+        with open(self.path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
-                text = json.loads(line)["text"]
-                ids = tokenizer.encode(text, add_special_tokens=False)
-                if eos_id is not None:
-                    ids.append(eos_id)
-                buffer.extend(ids)
-                while len(buffer) >= block_size:
-                    chunk = buffer[:block_size]
-                    buffer = buffer[block_size:]
-                    self.blocks.append(torch.tensor(chunk, dtype=torch.long))
-                    if max_blocks is not None and len(self.blocks) >= max_blocks:
+                try:
+                    data = json.loads(line)
+                    text = data.get("text") or data.get("content") or ""
+                    if not text:
+                        continue
+                    ids = self.tokenizer.encode(
+                        text,
+                        add_special_tokens=False,
+                        truncation=True,
+                        max_length=self.max_length,
+                    )
+                    if len(ids) < 2:
+                        continue
+                    t = torch.tensor(ids, dtype=torch.long)
+                    yield {"input_ids": t, "labels": t.clone()}
+                    n += 1
+                    if self.max_lines is not None and n >= self.max_lines:
                         break
-                if max_blocks is not None and len(self.blocks) >= max_blocks:
-                    break
-
-        if buffer and len(self.blocks) < (max_blocks or 10**18):
-            while len(buffer) < block_size:
-                buffer.append(pad_id)
-            self.blocks.append(torch.tensor(buffer[:block_size], dtype=torch.long))
-
-        if not self.blocks:
-            raise RuntimeError(f"No blocks built from {jsonl_path} — check text length vs block_size.")
-
-    def __len__(self) -> int:
-        return len(self.blocks)
-
-    def __getitem__(self, idx: int) -> torch.Tensor:
-        return self.blocks[idx]
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    continue
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--profile", type=str, default=None, help="Override model.yaml profile (small)")
-    ap.add_argument("--max_train_blocks", type=int, default=None, help="Cap training blocks for quick tests")
+    ap.add_argument("--max_train_blocks", type=int, default=None, help="Deprecated (streaming); optional cap lines/epoch via max_lines")
     ap.add_argument("--training_config", type=str, default="training.yaml", help="Training config filename inside configs/")
     ap.add_argument("--resume", type=Path, default=None, help="Resume from checkpoint dir (e.g. models/checkpoints/step_3000)")
     args = ap.parse_args()
@@ -122,6 +134,10 @@ def main() -> None:
 
     max_seq = int(train_cfg["max_seq_len"])
     mdict["n_positions"] = max(mdict.get("n_positions", max_seq), max_seq)
+
+    pad_id = tokenizer.pad_token_id
+    if pad_id is None:
+        pad_id = tokenizer.eos_token_id or 0
 
     cfg = gpt2_config_from_dict(mdict)
     set_seed(int(train_cfg.get("seed", 42)))
@@ -152,37 +168,46 @@ def main() -> None:
     if not train_path.is_file():
         raise SystemExit(f"Missing {train_path}")
 
-    print(f"Building train blocks from {train_path} (CPU, può richiedere molti minuti su JSONL grandi) ...", flush=True)
-    train_ds = BlockDataset(
+    train_max_lines = args.max_train_blocks  # riuso: limite righe per test rapidi
+    print(f"[TRAIN] streaming JSONL (no RAM preload): {train_path}", flush=True)
+    train_ds = StreamingJsonlIterableDataset(
         train_path,
         tokenizer,
-        block_size=max_seq,
-        max_blocks=args.max_train_blocks,
+        max_length=max_seq,
+        max_lines=train_max_lines,
     )
-    try:
-        print(f"Building val blocks ...", flush=True)
-        val_ds = (
-            BlockDataset(val_path, tokenizer, block_size=max_seq, max_blocks=500)
-            if val_path.is_file() and val_path.stat().st_size > 0
-            else None
-        )
-    except RuntimeError:
-        val_ds = None
-    if val_ds is None:
-        n = min(256, len(train_ds))
-        val_ds = torch.utils.data.Subset(train_ds, list(range(n)))
+
+    if val_path.is_file() and val_path.stat().st_size > 0:
+        print(f"[TRAIN] val stream (max 500 lines): {val_path}", flush=True)
+        val_ds = StreamingJsonlIterableDataset(val_path, tokenizer, max_length=max_seq, max_lines=500)
+    else:
+        print("[TRAIN] val: first 256 lines of train JSONL", flush=True)
+        val_ds = StreamingJsonlIterableDataset(train_path, tokenizer, max_length=max_seq, max_lines=256)
 
     batch_size = int(train_cfg["batch_size"])
-    num_workers = int(train_cfg.get("num_workers", 8))
-    dl_kw = _dataloader_kwargs(device, num_workers)
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, **dl_kw)
-    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, **dl_kw)
+    dl_kw = _dataloader_kwargs_streaming(device)
+    collate = _make_collate_fn(pad_id)
+
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=collate,
+        **dl_kw,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=collate,
+        **dl_kw,
+    )
     _pin = bool(dl_kw.get("pin_memory", False))
     _nb = device.type == "cuda" and _pin
     print(
-        f"DataLoader: num_workers={dl_kw.get('num_workers', 0)} "
-        f"pin_memory={_pin} prefetch={dl_kw.get('prefetch_factor', '—')} "
-        f"h2d_non_blocking={_nb}"
+        f"DataLoader: IterableDataset stream num_workers=0 "
+        f"pin_memory={_pin} h2d_non_blocking={_nb} batch_size={batch_size}",
+        flush=True,
     )
 
     accum = int(train_cfg["gradient_accumulation_steps"])
@@ -252,7 +277,8 @@ def main() -> None:
             elapsed = time.time() - t0
             print(
                 f"step {global_step}  loss={accum_loss:.4f}  "
-                f"lr={scheduler.get_last_lr()[0]:.2e}  {elapsed:.1f}s elapsed"
+                f"lr={scheduler.get_last_lr()[0]:.2e}  {elapsed:.1f}s elapsed",
+                flush=True,
             )
 
         if global_step % eval_every == 0:
@@ -274,14 +300,14 @@ def main() -> None:
                     n += 1
             model.train()
             if n:
-                print(f"  >> val_loss={val_loss / n:.4f}")
+                print(f"  >> val_loss={val_loss / n:.4f}", flush=True)
 
         if global_step % save_every == 0 or global_step == max_steps:
             save_path = ckpt_dir / f"step_{global_step}"
             save_path.mkdir(parents=True, exist_ok=True)
             model.save_pretrained(save_path)
             tokenizer.save_pretrained(save_path)
-            print(f"  >> saved checkpoint -> {save_path}")
+            print(f"  >> saved checkpoint -> {save_path}", flush=True)
 
     pbar.close()
     print("Training finished.")
