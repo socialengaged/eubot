@@ -1,0 +1,43 @@
+# Orchestrator Eubot / RunPod — comandi relativi alla root del repo (cwd di default).
+# Adatta dataset_mtime_path e training.cmd al layout del pod.
+
+tasks:
+  - name: cleaning
+    cmd: python -u ai_engine/data_pipeline/continuous_cleaner.py --once
+    timeout: 600
+  - name: quality_filter
+    cmd: python -u ai_engine/data_pipeline/quality_filter.py --once
+    timeout: 600
+  - name: selfplay
+    cmd: python -u ai_engine/data_pipeline/selfplay_generator.py --max-rounds 32
+    timeout: 900
+    enabled: false
+  - name: eval
+    cmd: python -u ai_engine/data_pipeline/eval_loop.py --once
+    timeout: 300
+    enabled: false
+  - name: training
+    cmd: python -u scripts/train.py --resume
+    cwd: eurobot_baby
+    timeout: 3600
+    enabled: false
+
+loop:
+  sleep_between_tasks: 8
+  restart_on_fail: true
+  max_retries: 3
+
+paths:
+  logs: ./orchestrator/logs/
+  state: ./orchestrator/state.json
+  lock: ./orchestrator/.orchestrator.lock
+
+# Training: enabled anche a livello task (sopra). Parte solo se:
+# - esiste manual_flag, oppure
+# - dataset_mtime_path è più recente di last_train in state.json, oppure
+# - allow_without_dataset_marker: true (sconsigliato in produzione)
+training:
+  enabled: false
+  manual_flag: ./orchestrator/training_force.flag
+  dataset_mtime_path: null
+  allow_without_dataset_marker: false
