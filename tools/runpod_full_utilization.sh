@@ -39,8 +39,11 @@ echo "[1] stop processi (pattern sicuri, no pkill -f serve.py da ssh one-liner)"
 fuser -k 8080/tcp 2>/dev/null || true
 _stop_one_pattern "eurobot_baby_venv/bin/python -u scripts/train.py"
 _stop_one_pattern "parallel/worker_gpu_burst.py"
+_stop_one_pattern "orchestrator/watchdog.py"
 _stop_one_pattern "orchestrator/orchestrator.py"
 sleep 3
+LOCK="$REPO/orchestrator/.orchestrator.lock"
+if [[ -f "$LOCK" ]]; then rm -f "$LOCK" && echo "[1b] removed stale $LOCK"; fi
 
 echo "[2] nvidia-smi (GPU libera)"
 nvidia-smi || true
@@ -65,12 +68,12 @@ echo $! > /root/train_loop.pid
 echo "[OK] TRAIN STARTED pid=$(cat /root/train_loop.pid)"
 
 mkdir -p "$REPO/orchestrator/logs"
-cd "$REPO"
-nohup "$EUBOT_VENV_PYTHON" -u parallel/worker_gpu_burst.py >>"$REPO/orchestrator/logs/selfplay.log" 2>&1 &
+# Percorsi assoluti: nohup non deve dipendere dal cwd (evita /root/orchestrator/...).
+nohup "$EUBOT_VENV_PYTHON" -u "$REPO/parallel/worker_gpu_burst.py" >>"$REPO/orchestrator/logs/selfplay.log" 2>&1 &
 echo $! > /root/gpu_burst.pid
 echo "[OK] worker_gpu_burst STARTED pid=$(cat /root/gpu_burst.pid)"
 
-nohup "$EUBOT_VENV_PYTHON" -u orchestrator/orchestrator.py >>"$REPO/orchestrator/logs/orchestrator.log" 2>&1 &
+nohup "$EUBOT_VENV_PYTHON" -u "$REPO/orchestrator/orchestrator.py" >>"$REPO/orchestrator/logs/orchestrator.log" 2>&1 &
 echo $! > /root/orchestrator.pid
 echo "[OK] orchestrator STARTED pid=$(cat /root/orchestrator.pid)"
 

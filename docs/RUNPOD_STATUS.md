@@ -4,7 +4,9 @@ File aggiornato dagli interventi di deploy/validazione. Path sul pod: `/workspac
 
 ## Ultimo aggiornamento
 
-- **Data (UTC):** 2026-03-28 — allineamento script `runpod_full_utilization.sh`, config orchestrator (`sleep_between_tasks: 8`, selfplay/eval disabilitati durante run train dedicato)
+- **Data (UTC):** 2026-03-28 ~06:30 — deploy script su pod (SCP + `sed` CRLF→LF); train ripreso da `step_918672` (`batch_size` 64, `max_steps` 1.4M, `save_every` 2000 in `training.yaml`); worker `parallel/worker_gpu_burst.py` attivo; orchestrator **singola istanza** dopo stop watchdog/orchestrator vecchi e rimozione lock; `nohup` usa path assoluti a `worker_gpu_burst.py` / `orchestrator.py` (evita cwd `/root`).
+- **Nota:** se `/workspace/eubot` non è clone git sul pod, aggiornare con `scp` o `rsync` da repo locale dopo `git pull`.
+- **Precedente:** 2026-03-28 — allineamento script `runpod_full_utilization.sh`, config orchestrator (`sleep_between_tasks: 8`, selfplay/eval disabilitati durante run train dedicato)
 - **Host SSH tipico:** `root@194.68.245.207` porta `22125` (verificare in dashboard RunPod se il pod è stato ricreato)
 - **Chiave:** `%USERPROFILE%\.ssh\eubot_ed25519`
 
