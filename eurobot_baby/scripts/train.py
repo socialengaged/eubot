@@ -42,6 +42,15 @@ def _move_batch_to_device(batch, device: torch.device, non_blocking: bool):
     return batch.to(device, non_blocking=non_blocking)
 
 
+def _count_tokens(batch: dict | torch.Tensor) -> int:
+    """Token reali (non pad) nel batch."""
+    if isinstance(batch, dict) and "attention_mask" in batch:
+        return int(batch["attention_mask"].sum().item())
+    if isinstance(batch, dict) and "input_ids" in batch:
+        return int(batch["input_ids"].numel())
+    return int(batch.numel())
+
+
 def _make_collate_fn(pad_token_id: int):
     """Padding variabile nel batch; labels=-100 sul pad (loss HF)."""
 
@@ -146,10 +155,11 @@ def main() -> None:
     print(f"[TRAIN] device={device}")
 
     resume_step = 0
-    if args.resume and args.resume.is_dir():
-        print(f"Resuming from {args.resume} ...")
-        model = GPT2LMHeadModel.from_pretrained(str(args.resume))
-        name = args.resume.name
+    resume_dir: Path | None = args.resume if args.resume and args.resume.is_dir() else None
+    if resume_dir is not None:
+        print(f"Resuming from {resume_dir} ...")
+        model = GPT2LMHeadModel.from_pretrained(str(resume_dir))
+        name = resume_dir.name
         if name.startswith("step_"):
             resume_step = int(name.split("_")[1])
         print(f"  resumed at step {resume_step}")
@@ -222,9 +232,26 @@ def main() -> None:
         return
 
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
-    scheduler = get_linear_schedule_with_warmup(opt, warmup, max_steps)
-    for _ in range(resume_step):
-        scheduler.step()
+    for g in opt.param_groups:
+        g.setdefault("initial_lr", g["lr"])
+
+    opt_ckpt = resume_dir / "optimizer.pt" if resume_dir else None
+    if opt_ckpt is not None and opt_ckpt.is_file():
+        opt.load_state_dict(torch.load(opt_ckpt, map_location=device))
+        print("[TRAIN] loaded optimizer.pt from checkpoint", flush=True)
+
+    sched_ckpt = resume_dir / "scheduler.pt" if resume_dir else None
+    if sched_ckpt is not None and sched_ckpt.is_file():
+        scheduler = get_linear_schedule_with_warmup(opt, warmup, max_steps)
+        scheduler.load_state_dict(torch.load(sched_ckpt, map_location="cpu"))
+        print("[TRAIN] loaded scheduler.pt from checkpoint", flush=True)
+    else:
+        last_epoch = resume_step - 1 if resume_step > 0 else -1
+        scheduler = get_linear_schedule_with_warmup(opt, warmup, max_steps, last_epoch=last_epoch)
+        print(f"[TRAIN] scheduler aligned without warmup stepping loop (last_epoch={last_epoch})", flush=True)
+
+    global_step = resume_step
+    print(f"[TRAIN] resume global_step={global_step}", flush=True)
 
     use_fp16 = bool(train_cfg.get("use_fp16", True)) and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_fp16)
@@ -235,17 +262,25 @@ def main() -> None:
     save_every = int(train_cfg["save_every"])
     eval_every = int(train_cfg["eval_every"])
     grad_clip = float(train_cfg.get("gradient_clip", 1.0))
+    perf_every = int(train_cfg.get("perf_log_every", 20))
+    ema_alpha = float(train_cfg.get("perf_ema_alpha", 0.1))
 
-    global_step = resume_step
     model.train()
-    running_loss = 0.0
     t0 = time.time()
     pbar = tqdm(total=max_steps, initial=resume_step, desc="train")
 
     train_iter = iter(train_loader)
+    ema_step_time: float | None = None
+    ema_tok_s: float | None = None
+
     while global_step < max_steps:
+        t_step = time.perf_counter()
         opt.zero_grad(set_to_none=True)
         accum_loss = 0.0
+        tokens_this_step = 0
+        skip_optimizer = False
+        did_backward = False
+
         for _ in range(accum):
             try:
                 batch = next(train_iter)
@@ -253,14 +288,32 @@ def main() -> None:
                 train_iter = iter(train_loader)
                 batch = next(train_iter)
             batch = _move_batch_to_device(batch, device, _nb)
+            tokens_this_step += _count_tokens(batch)
             with torch.amp.autocast("cuda", enabled=use_fp16):
                 if isinstance(batch, dict):
                     out = model(**batch)
                 else:
                     out = model(input_ids=batch, labels=batch)
                 loss = out.loss / accum
+
+            if not torch.isfinite(loss).all():
+                lv = loss.detach().float().item() if loss.numel() == 1 else float("nan")
+                print(
+                    f"[TRAIN][WARN] non-finite loss at step {global_step} (micro): {lv}",
+                    flush=True,
+                )
+                skip_optimizer = True
+                break
+
             scaler.scale(loss).backward()
+            did_backward = True
             accum_loss += loss.item()
+
+        if skip_optimizer:
+            opt.zero_grad(set_to_none=True)
+            if did_backward:
+                scaler.update()
+            continue
 
         scaler.unscale_(opt)
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
@@ -269,9 +322,25 @@ def main() -> None:
         scheduler.step()
 
         global_step += 1
-        running_loss += accum_loss
+        step_wall = time.perf_counter() - t_step
+        if ema_step_time is None:
+            ema_step_time = step_wall
+            ema_tok_s = tokens_this_step / max(step_wall, 1e-9)
+        else:
+            ema_step_time = ema_alpha * step_wall + (1.0 - ema_alpha) * ema_step_time
+            inst_tok_s = tokens_this_step / max(step_wall, 1e-9)
+            ema_tok_s = ema_alpha * inst_tok_s + (1.0 - ema_alpha) * ema_tok_s
+
         pbar.update(1)
         pbar.set_postfix(loss=f"{accum_loss:.4f}")
+
+        if global_step % perf_every == 0 and ema_step_time is not None and ema_tok_s is not None:
+            print(
+                f"[TRAIN][PERF] step={global_step} step_time={ema_step_time:.3f}s "
+                f"tok/s={ema_tok_s:.0f} eff_batch={batch_size * accum} "
+                f"tokens_last_step={tokens_this_step}",
+                flush=True,
+            )
 
         if global_step % 50 == 0:
             elapsed = time.time() - t0
@@ -307,7 +376,9 @@ def main() -> None:
             save_path.mkdir(parents=True, exist_ok=True)
             model.save_pretrained(save_path)
             tokenizer.save_pretrained(save_path)
-            print(f"  >> saved checkpoint -> {save_path}", flush=True)
+            torch.save(opt.state_dict(), save_path / "optimizer.pt")
+            torch.save(scheduler.state_dict(), save_path / "scheduler.pt")
+            print(f"  >> saved checkpoint -> {save_path} (+ optimizer.pt, scheduler.pt)", flush=True)
 
     pbar.close()
     print("Training finished.")

@@ -4,6 +4,8 @@
 
 **Stato runtime dettagliato (train / burst / orchestrator, comandi sicuri SSH):** [RUNPOD_STATUS.md](RUNPOD_STATUS.md). Script pod: [`tools/runpod_full_utilization.sh`](../tools/runpod_full_utilization.sh).
 
+**Training (2026-03-28):** `eurobot_baby/scripts/train.py` — resume con scheduler allineato (`last_epoch` o stato da checkpoint), salvataggio `optimizer.pt`/`scheduler.pt` nei `step_*`, AMP con skip loss non finite, grad clip dopo `unscale_`, log throughput `[TRAIN][PERF]`. **Dual-mode:** non lanciare `serve.py` sulla stessa GPU del train (invariato).
+
 ---
 
 ## 0. Politica: sfruttare la macchina al massimo
