@@ -20,7 +20,6 @@ from tqdm import tqdm
 from transformers import GPT2LMHeadModel, PreTrainedTokenizerFast, get_linear_schedule_with_warmup
 
 from baby_utils import (
-    device_auto,
     gpt2_config_from_dict,
     load_yaml,
     model_config_dict,
@@ -40,6 +39,13 @@ def _dataloader_kwargs(device: torch.device, num_workers: int) -> dict[str, obje
             "prefetch_factor": 4,
         }
     return {"num_workers": 0, "pin_memory": device.type == "cuda"}
+
+
+def _move_batch_to_device(batch, device: torch.device, non_blocking: bool):
+    """Sposta batch su device (tensore o dict da futuri collate)."""
+    if isinstance(batch, dict):
+        return {k: v.to(device, non_blocking=non_blocking) for k, v in batch.items()}
+    return batch.to(device, non_blocking=non_blocking)
 
 
 class BlockDataset(Dataset):
@@ -120,19 +126,23 @@ def main() -> None:
     cfg = gpt2_config_from_dict(mdict)
     set_seed(int(train_cfg.get("seed", 42)))
 
-    device = device_auto()
-    print(f"Device: {device}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[TRAIN] device={device}")
 
     resume_step = 0
     if args.resume and args.resume.is_dir():
         print(f"Resuming from {args.resume} ...")
-        model = GPT2LMHeadModel.from_pretrained(str(args.resume)).to(device)
+        model = GPT2LMHeadModel.from_pretrained(str(args.resume))
         name = args.resume.name
         if name.startswith("step_"):
             resume_step = int(name.split("_")[1])
         print(f"  resumed at step {resume_step}")
     else:
-        model = GPT2LMHeadModel(cfg).to(device)
+        model = GPT2LMHeadModel(cfg)
+
+    model = model.to(device)
+    if device.type == "cuda":
+        assert next(model.parameters()).is_cuda, "MODEL NOT ON GPU"
 
     param_count = sum(p.numel() for p in model.parameters()) / 1e6
     print(f"Model: {param_count:.0f}M params")
@@ -217,9 +227,12 @@ def main() -> None:
             except StopIteration:
                 train_iter = iter(train_loader)
                 batch = next(train_iter)
-            batch = batch.to(device, non_blocking=_nb)
+            batch = _move_batch_to_device(batch, device, _nb)
             with torch.amp.autocast("cuda", enabled=use_fp16):
-                out = model(input_ids=batch, labels=batch)
+                if isinstance(batch, dict):
+                    out = model(**batch)
+                else:
+                    out = model(input_ids=batch, labels=batch)
                 loss = out.loss / accum
             scaler.scale(loss).backward()
             accum_loss += loss.item()
@@ -251,9 +264,12 @@ def main() -> None:
                 for i, vb in enumerate(val_loader):
                     if i >= eval_batches:
                         break
-                    vb = vb.to(device, non_blocking=_nb)
+                    vb = _move_batch_to_device(vb, device, _nb)
                     with torch.amp.autocast("cuda", enabled=use_fp16):
-                        out = model(input_ids=vb, labels=vb)
+                        if isinstance(vb, dict):
+                            out = model(**vb)
+                        else:
+                            out = model(input_ids=vb, labels=vb)
                     val_loss += out.loss.item()
                     n += 1
             model.train()
